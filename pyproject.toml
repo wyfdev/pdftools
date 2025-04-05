@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "pdftools"
+version = "2.0.0"
+description = "PDF Tools"
+authors = ["Yufeng <dev@wyf.io>"]
+readme = "README.md"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+pdftools = "pdftools.__main__:main"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+tqdm = "^4.67.1"
+pymupdf = "^1.25.5"
+opencv-python = "^4.11.0.86"
+numpy = "^2.2.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

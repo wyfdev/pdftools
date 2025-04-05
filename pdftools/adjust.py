@@ -1,0 +1,207 @@
+from re import split as re_split
+from sys import stderr
+from pathlib import Path
+from contextlib import nullcontext
+
+from typing import Tuple
+
+import cv2
+import numpy as np
+
+from tqdm import tqdm
+from pymupdf import open as pdf_open
+from pymupdf import Pixmap, csGRAY
+from pymupdf import Rect, Page
+
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait as wait_futures
+
+
+def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None):
+    if plan_file:
+        with open(plan_file) as f:
+            plan_text = re_split(r'\s+', f.read())
+
+    plan: dict[str, str] = dict([sec.split('=') for sec in plan_text if sec])
+
+    if not plan:
+        print('No plan given.')
+        return
+
+    # file
+    srcfile = Path(src)    
+    dstfile = Path(dst)  
+
+    if not srcfile.expanduser().exists():
+        print(f'No such a file "{srcfile}"', file=stderr)
+        exit(1)
+
+    pdf = pdf_open(srcfile)
+
+    print('adjusting :')
+
+    # iterate each pages
+    for page_num, movex_str in plan.items():
+        movex = float(movex_str) / 100
+        page = pdf.load_page(int(page_num)-1)
+        data = vars(page.mediabox)
+        move = float(data['x1'] - data['x0']) * movex
+        data['x0'] -= move
+        data['x1'] -= move
+        print('  ', page_num, ' >> ', movex, ' : ', data)
+        page.set_mediabox(Rect(**data))
+
+    # save to file
+    print('saveing   : ', end='')
+    pdf.save(dstfile)
+    print('Done')
+
+
+
+
+def adjust_pdf_margin_auto(src: str, dst: str):
+    srcfile = Path(src)    
+    dstfile = Path(dst)  
+    pdf = pdf_open(srcfile)
+
+    def image_convert(imgarr: np.array) -> np.array:
+        # >> thresholding
+        thresh, imgarr = cv2.threshold(imgarr, 210, 255, cv2.THRESH_BINARY)
+
+        # >> sharping
+        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        imgarr = cv2.filter2D(imgarr, -1, kernel)
+
+        return imgarr
+
+    def cal_page_movex(page) -> Tuple[float, float]:
+
+        class ClifNotFoundError(Exception):
+            pass
+
+        def cal_margin(imgarr: np.array) -> tuple[float, float]:
+            """
+            return: (left_clif, right_clif) in persentage
+            """
+            shape_h, shape_w = imgarr.shape
+
+            # down sampling for calculate
+            tmp_w = 200
+            tmp_h = (tmp_w * shape_h) // shape_w
+            tmparr = cv2.resize(imgarr, (tmp_w, tmp_h), interpolation=cv2.INTER_AREA)
+            tmparr = cv2.bitwise_not(tmparr)
+            
+            def cov_threshold(img):
+                _, img = cv2.threshold(img, 20, 255, cv2.THRESH_BINARY)
+                return img
+            tmparr = cov_threshold(tmparr)
+
+            def cov_mask_characters(img, thresh=220):
+                contours, hierarchy = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # Iterate over the contours and draw a rectangle around each character.
+                for contour in contours:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    cv2.rectangle(img , (x, y), (x + w, y + h), 255, -1)
+                return img
+            tmparr = cov_mask_characters(tmparr)
+
+            def cal_weight_x():
+                x_axis_weight = np.zeros(tmp_w, np.float32)
+                h = tmparr.shape[0]
+                for x in range(tmp_w):  # left -> right
+                    x_axis_weight[x] = \
+                        sum((1 if i>220 else 0) for i in tmparr[:, x]) / h
+                return x_axis_weight
+            x_axis_weight = cal_weight_x()
+
+
+            X_THRESHOLD = 0.05
+
+            def cal_clif_l():
+                # from center to left |----- <-* -----|, stop at weight clif
+                for i in range(int(tmp_w * (1/3)), 0, -1):
+                    if np.mean(x_axis_weight[max(0, i-3): i]) < X_THRESHOLD:
+                        return i
+
+            def cal_clif_r():
+                # from center to right |----- *-> -----|, stop at weight clif
+                for i in range(int(tmp_w * (2/3)), tmp_w):
+                    if np.mean(x_axis_weight[i: min(tmp_w, i+3)]) < X_THRESHOLD:
+                        return i
+
+            def cal_clif_r_by_r_to_l():
+                # from right to center |---------- <-*|, stop at weight clif
+                for i in range(tmp_w, int(tmp_w * (2/3)), -1):
+                    if np.mean(x_axis_weight[max(0, i-3): i]) > X_THRESHOLD:
+                        return i
+
+            try:
+                mlp = cal_clif_l() / tmp_w
+                mrp = cal_clif_r() / tmp_w
+
+                if mlp > 0.35 and mrp < 0.65:
+                    raise ClifNotFoundError('clif found been extream', (mlp, mrp))
+
+                return mlp, mrp
+            except Exception as err:
+                # print('clif not found')
+                return (0, 0)
+                # raise ClifNotFoundError('clif not found')
+
+        def cal_movex(page, mlp: float, mrp: float):
+            shape_h, shape_w = imgarr.shape
+
+            movex = (((mlp + mrp) / 2) - 0.5)     # round()
+            if abs(movex) > 0.2:
+                movex = 0
+
+            return movex
+
+        try:
+            pix = page.get_pixmap()
+            # convert to gray
+            pix_gray = Pixmap(csGRAY, pix)
+            # convert to array
+            imgarr = np.frombuffer(pix_gray.samples, dtype=np.uint8) \
+                .reshape(pix.height, pix.width)
+
+            mlp, mrp = cal_margin(imgarr)
+            movex = cal_movex(page, mlp, mrp)
+            return movex
+        except Exception as err:
+            raise err
+            # return (0, 0)
+
+    def do_page_adjust(page, movex: float):
+        data = vars(page.mediabox)
+        move = float(data['x1'] - data['x0']) * movex
+        data['x0'] += move
+        data['x1'] += move
+        page.set_mediabox(Rect(**data))
+
+    #
+    # iterate each pages
+    #
+    with nullcontext('scan file'), tqdm(total=len(pdf), desc='scanning  ') as pbar:
+        plan = dict()
+
+        def plan_page_adjusting(page_id):
+            page = pdf.load_page(page_id)
+            movex = cal_page_movex(page)
+            plan[page_id] = movex
+            pbar.update(1)
+
+        with ThreadPoolExecutor(max_workers=None) as executor:
+            wait_futures([executor.submit(plan_page_adjusting, page_id)
+                            for page_id in range(len(pdf))])
+
+    with nullcontext('adjusting'):
+        # waiting for all tasks
+        for id, movex in tqdm(plan.items(), desc='adjusting '):
+            page = pdf.load_page(id)
+            do_page_adjust(page, movex)
+
+    with nullcontext('saveing'):
+        print('saveing   ', end='')
+        pdf.save(dstfile)
+        print('Done')
