@@ -3,7 +3,7 @@ from sys import stderr
 from pathlib import Path
 from contextlib import nullcontext
 
-from typing import Tuple
+from typing import Tuple, List
 
 import cv2
 import numpy as np
@@ -29,8 +29,8 @@ def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None)
         return
 
     # file
-    srcfile = Path(src)    
-    dstfile = Path(dst)  
+    srcfile = Path(src)
+    dstfile = Path(dst)
 
     if not srcfile.expanduser().exists():
         print(f'No such a file "{srcfile}"', file=stderr)
@@ -59,9 +59,26 @@ def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None)
 
 
 
-def adjust_pdf_margin_auto(src: str, dst: str):
-    srcfile = Path(src)    
-    dstfile = Path(dst)  
+def adjust_pdf_margin_auto(src: str, dst: str, x_threshold=0.05, skips=None):
+
+    def parse_range(skips: str):
+        the_range: List[int] = []
+        for part in skips.split(','):
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                the_range.extend(range(start - 1, end))
+            else:
+                the_range.append(int(part) - 1)
+
+        class SkipRange:
+            def __contains__(self, item):
+                return item in the_range
+        return SkipRange()
+
+    skips = parse_range(skips) if skips else list()
+
+    srcfile = Path(src)
+    dstfile = Path(dst)
     pdf = pdf_open(srcfile)
 
     def image_convert(imgarr: np.array) -> np.array:
@@ -90,7 +107,7 @@ def adjust_pdf_margin_auto(src: str, dst: str):
             tmp_h = (tmp_w * shape_h) // shape_w
             tmparr = cv2.resize(imgarr, (tmp_w, tmp_h), interpolation=cv2.INTER_AREA)
             tmparr = cv2.bitwise_not(tmparr)
-            
+
             def cov_threshold(img):
                 _, img = cv2.threshold(img, 20, 255, cv2.THRESH_BINARY)
                 return img
@@ -114,25 +131,22 @@ def adjust_pdf_margin_auto(src: str, dst: str):
                 return x_axis_weight
             x_axis_weight = cal_weight_x()
 
-
-            X_THRESHOLD = 0.05
-
             def cal_clif_l():
                 # from center to left |----- <-* -----|, stop at weight clif
                 for i in range(int(tmp_w * (1/3)), 0, -1):
-                    if np.mean(x_axis_weight[max(0, i-3): i]) < X_THRESHOLD:
+                    if np.mean(x_axis_weight[max(0, i-3): i]) < x_threshold:
                         return i
 
             def cal_clif_r():
                 # from center to right |----- *-> -----|, stop at weight clif
                 for i in range(int(tmp_w * (2/3)), tmp_w):
-                    if np.mean(x_axis_weight[i: min(tmp_w, i+3)]) < X_THRESHOLD:
+                    if np.mean(x_axis_weight[i: min(tmp_w, i+3)]) < x_threshold:
                         return i
 
             def cal_clif_r_by_r_to_l():
                 # from right to center |---------- <-*|, stop at weight clif
                 for i in range(tmp_w, int(tmp_w * (2/3)), -1):
-                    if np.mean(x_axis_weight[max(0, i-3): i]) > X_THRESHOLD:
+                    if np.mean(x_axis_weight[max(0, i-3): i]) > x_threshold:
                         return i
 
             try:
@@ -186,9 +200,12 @@ def adjust_pdf_margin_auto(src: str, dst: str):
         plan = dict()
 
         def plan_page_adjusting(page_id):
-            page = pdf.load_page(page_id)
-            movex = cal_page_movex(page)
-            plan[page_id] = movex
+            if page_id not in skips:
+                page = pdf.load_page(page_id)
+                movex = cal_page_movex(page)
+                plan[page_id] = movex
+            else:
+                plan[page_id] = 0
             pbar.update(1)
 
         with ThreadPoolExecutor(max_workers=None) as executor:
@@ -202,6 +219,6 @@ def adjust_pdf_margin_auto(src: str, dst: str):
             do_page_adjust(page, movex)
 
     with nullcontext('saveing'):
-        print('saveing   ', end='')
+        print('saveing   : ', end='')
         pdf.save(dstfile)
         print('Done')

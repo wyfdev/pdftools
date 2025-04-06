@@ -29,6 +29,8 @@ def main():
     def _(parser):
         parser.add_argument('-s', '--src', help='source PDF file', required=True)
         parser.add_argument('-d', '--dst', help='destination PDF file', required=True)
+        parser.add_argument('--x-threshold', type=float, default=0.05, help='x-threshold for auto adjust')
+        parser.add_argument('--skips', type=str, help='pages to skip in form like 1,3-5,7')
         return adjust_pdf_margin_auto
     
     @sub_command('adjust-page', help='adjust PDF files in pages')
