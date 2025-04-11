@@ -33,10 +33,11 @@ def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None)
     def parse_plan(secs: list[str], end_page_num: int) -> dict[int, float]:
         """parse plan text to dict in format of {page_num: movex}
            secs iterate are in format of:
-            - page_num=movex:   "10=5"     -> {10: 5}
-            - page_range=movex: "10-12=3"  -> {10: 3, 11: 3, 12: 3}
-            - page_range~movex: "10-12~3"  -> {10: 3, 11:-3, 12: 3}
-            - page_range~movex: "10-end~3" -> {10: 3, 11:-3, ..., end_page_num: 3}
+            - page_num=movex:   "10=5"       -> {10: 5}
+            - page_range=movex: "10-12=3"    -> {10: 3, 11: 3, 12: 3}
+            - page_range~movex: "10-12~3"    -> {10: 3, 11:-3, 12: 3}
+            - page_range~movex: "10-end~3"   -> {10: 3, 11:-3, ..., end_page_num: 3}
+            - page_range~movex: "10-end-2~3" -> {10: 3, 11:-3, ..., end_page_num-2: 3}
         """
         plan: dict[int, float] = {}
         for sec in secs:

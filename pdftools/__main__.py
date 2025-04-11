@@ -39,13 +39,14 @@ def main():
         parser.add_argument('-d', '--dst', help='destination PDF file', required=True)
         parser.add_argument('-f', '--plan-file', help='plan file', required=False)
         examples = '\n'.join([
-            'format     (example)  -> parsed',
-            '-------------------------------',
-            'number=x   (10=5)     -> {10: 5}',
-            'from-to=x  (10-12=3)  -> {10: 3, 11: 3, 12: 3}',
-            'from-to~x  (10-12~3)  -> {10: 3, 11:-3, 12: 3}',
-            'from~end=x (10-end=3) -> {10: 3, 11: 3, ..., end_page_num: 3}',
-            'from~end~x (10-end~3) -> {10: 3, 11:-3, ..., end_page_num: 3}',
+            'format        (example)     -> parsed',
+            '-------------------------------------',
+            'number=x      (10=5)        -> {10: 5}',
+            'from-to=x     (10-12=3)     -> {10: 3, 11: 3, 12: 3}',
+            'from-to~x     (10-12~3)     -> {10: 3, 11:-3, 12: 3}',
+            'from~end=x    (10-end=3)    -> {10: 3, 11: 3, ..., end_page_num: 3}',
+            'from~end~x    (10-end~3)    -> {10: 3, 11:-3, ..., end_page_num: 3}',
+            'from~end-offset~x (10-end-2~3) -> {10: 3, 11:-3, ..., end_page_num-2: 3}',
         ])
         parser.add_argument('plan_text', nargs='*',
                             help='plan text, in format by example:\n\n{}'.format(examples))
