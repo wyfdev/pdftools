@@ -1,4 +1,4 @@
-from argparse import ArgumentParser
+from argparse import ArgumentParser, RawTextHelpFormatter
 
 from .adjust import adjust_pdf_margin_manual, adjust_pdf_margin_auto
 from .merge import merge_pdfs
@@ -33,12 +33,22 @@ def main():
         parser.add_argument('--skips', type=str, help='pages to skip in form like 1,3-5,7')
         return adjust_pdf_margin_auto
     
-    @sub_command('adjust-page', help='adjust PDF files in pages')
+    @sub_command('adjust-page', help='adjust PDF files in pages', formatter_class=RawTextHelpFormatter)
     def _(parser):
         parser.add_argument('-s', '--src', help='source PDF file', required=True)
         parser.add_argument('-d', '--dst', help='destination PDF file', required=True)
         parser.add_argument('-f', '--plan-file', help='plan file', required=False)
-        parser.add_argument('plan_text', nargs='*', help='plan text')
+        examples = '\n'.join([
+            'format     (example)  -> parsed',
+            '-------------------------------',
+            'number=x   (10=5)     -> {10: 5}',
+            'from-to=x  (10-12=3)  -> {10: 3, 11: 3, 12: 3}',
+            'from-to~x  (10-12~3)  -> {10: 3, 11:-3, 12: 3}',
+            'from~end=x (10-end=3) -> {10: 3, 11: 3, ..., end_page_num: 3}',
+            'from~end~x (10-end~3) -> {10: 3, 11:-3, ..., end_page_num: 3}',
+        ])
+        parser.add_argument('plan_text', nargs='*',
+                            help='plan text, in format by example:\n\n{}'.format(examples))
         return adjust_pdf_margin_manual
 
     @sub_command('merge', help='merge PDF files into one')

@@ -1,4 +1,4 @@
-from re import split as re_split
+from re import split as re_split, sub as re_sub, match as re_match
 from sys import stderr
 from pathlib import Path
 from contextlib import nullcontext
@@ -18,16 +18,6 @@ from concurrent.futures import wait as wait_futures
 
 
 def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None):
-    if plan_file:
-        with open(plan_file) as f:
-            plan_text = re_split(r'\s+', f.read())
-
-    plan: dict[str, str] = dict([sec.split('=') for sec in plan_text if sec])
-
-    if not plan:
-        print('No plan given.')
-        return
-
     # file
     srcfile = Path(src)
     dstfile = Path(dst)
@@ -36,7 +26,50 @@ def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None)
         print(f'No such a file "{srcfile}"', file=stderr)
         exit(1)
 
+    if plan_file:
+        with open(plan_file) as f:
+            plan_text = re_split(r'\s+', f.read())
+
+    def parse_plan(secs: list[str], end_page_num: int) -> dict[int, float]:
+        """parse plan text to dict in format of {page_num: movex}
+           secs iterate are in format of:
+            - page_num=movex:   "10=5"     -> {10: 5}
+            - page_range=movex: "10-12=3"  -> {10: 3, 11: 3, 12: 3}
+            - page_range~movex: "10-12~3"  -> {10: 3, 11:-3, 12: 3}
+            - page_range~movex: "10-end~3" -> {10: 3, 11:-3, ..., end_page_num: 3}
+        """
+        plan: dict[int, float] = {}
+        for sec in secs:
+            if not sec:
+                continue
+            if 'end' in sec:
+                if (m := re_match(r'^(\d+)-(end-(\d+))[=~].+$', sec)):
+                    s, t, m = m.groups() # type: ignore # start, tag, minus: ('100', 'end-5', '5')
+                    end_page_num = max(int(s), end_page_num-int(m))
+                    sec = sec.replace(t, str(end_page_num))
+                else:
+                    sec = sec.replace('end', str(end_page_num))
+            p = r'^(\d+)(-)?(\d+)?(=|~)(-?\d+(?:\.\d+)?)$'
+            sec = re_sub(p, r'\1 \2 \3 \4 \5', sec)
+            sec = re_split(r'\s+', sec)  # type: ignore
+            match sec:
+                case (n, '=', x):
+                    plan[int(n)] = float(x)
+                case (s, '-', e, '=', x):
+                    for n in range(int(s), int(e)+1):
+                        plan[n] = float(x)
+                case (s, '-', e, '~', x):
+                    for i, n in enumerate(range(int(s), int(e)+1)):
+                        plan[n] = float(x) * (-1 if i%2 else 1)
+        return plan
+
     pdf = pdf_open(srcfile)
+
+    plan = parse_plan(plan_text, end_page_num=len(pdf)+1)
+
+    if not plan:
+        print('No plan given.')
+        return
 
     print('adjusting :')
 
