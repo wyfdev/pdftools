@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait as wait_futures
 
 
-def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None):
+def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None, verbose=False):
     # file
     srcfile = Path(src)
     dstfile = Path(dst)
@@ -66,23 +66,22 @@ def adjust_pdf_margin_manual(src: str, dst: str, plan_text=None, plan_file=None)
 
     pdf = pdf_open(srcfile)
 
-    plan = parse_plan(plan_text, end_page_num=len(pdf)+1)
+    plan = parse_plan(plan_text, end_page_num=len(pdf))
 
     if not plan:
         print('No plan given.')
         return
 
-    print('adjusting :')
-
     # iterate each pages
-    for page_num, movex_str in plan.items():
-        movex = float(movex_str) / 100
+    for page_num, movex_str in tqdm(plan.items(), desc='adjusting : '):
+        movep = float(movex_str) / 100
         page = pdf.load_page(int(page_num)-1)
         data = vars(page.mediabox)
-        move = float(data['x1'] - data['x0']) * movex
-        data['x0'] -= move
-        data['x1'] -= move
-        print('  ', page_num, ' >> ', movex, ' : ', data)
+        movex = float(data['x1'] - data['x0']) * movep
+        data['x0'] -= movex
+        data['x1'] -= movex
+        if verbose:
+            print(f'  {page_num:>3} >> {movep:>5} : {data}')
         page.set_mediabox(Rect(**data))
 
     # save to file

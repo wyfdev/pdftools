@@ -50,6 +50,7 @@ def main():
         ])
         parser.add_argument('plan_text', nargs='*',
                             help='plan text, in format by example:\n\n{}'.format(examples))
+        parser.add_argument('--verbose', action='store_true', help='verbose mode', default=False)
         return adjust_pdf_margin_manual
 
     @sub_command('merge', help='merge PDF files into one')
